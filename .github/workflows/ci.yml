@@ -1,0 +1,154 @@
+name: ci
+# THE GATE (B2-ROAD-A · RELAY A · THE ROAD, 2026-09-30 — the decision map design/THE_CLOUD_DOOR_DECISION_MAP_2026-09-30.md CD-4; its
+# prototype proven in THE TRIAL, G2–G12, on a throwaway repository). One workflow, NO workflow-level path filter, on every pull request
+# and on every push to main while the old path lives. Its last job, `gate`, is the one required check (beside `law`, which runs from
+# main's own copy — law.yml): it fails on a draft and whenever a job it needs failed or was cancelled, and it reads a skipped job as
+# fine — so what runs is decided here, by the `changes` job (tool/road/changes.py), never by a path filter (a path-filtered required
+# check waits forever — the cross-check K-2). The jobs: changes · spec-lint (always) · road (the road tools' own fixtures, always) ·
+# app (the whole suite on app code, specs or the net itself; only the reader tests on a record a test reads) · walk (lock relays) ·
+# review (a verdict for this exact change — tool/road/review.py, K-9) · rules-isolation (INV-S22-21, gated off until B4) · gate.
+# Carried from the old ci.yml, whose paths-ignore let a spec change leave main red for 25 hours (B2-R50 → B2-R52): the E1 guard, the
+# 3.44.6 pin, format, analyze, the four gates, the suite, the coverage census and the debug APK — unchanged in what they check. The old
+# spec-lint.yml's one job lives here now; tooling.yml's fixture runner retired with it (the old tools are the fallback path's).
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      walks:
+        description: "all — run every walk recipe once (a proof run; never a required check)"
+        required: false
+        default: ""
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      suite: ${{ steps.c.outputs.suite }}
+      tests: ${{ steps.c.outputs.tests }}
+      walk: ${{ steps.c.outputs.walk }}
+      drivers: ${{ steps.c.outputs.drivers }}
+      records_only: ${{ steps.c.outputs.records_only }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: c
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          WALKS: ${{ inputs.walks }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            printf '' > changed.txt
+          elif [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ]; then
+            git ls-files | sed 's/^/A\t/' > changed.txt
+          elif [ "$EVENT" = pull_request ]; then
+            git diff --name-status --no-renames "$BASE...$HEAD" > changed.txt
+          else
+            git diff --name-status --no-renames "$BASE" "$HEAD" > changed.txt
+          fi
+          cat changed.txt
+          ARGS=""; [ "$WALKS" = all ] && ARGS=--all-walks
+          python3 tool/road/changes.py $ARGS < changed.txt | tee -a "$GITHUB_OUTPUT"
+  spec-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "spec-lint — stubbed in the sandbox rehearsal (the real job runs dart run tool/spec_lint.dart --gate)"
+  road:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 tool/road/test_road.py
+  app:
+    needs: changes
+    if: needs.changes.outputs.suite != 'none' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      SUITE: ${{ needs.changes.outputs.suite }}
+      TESTS: ${{ needs.changes.outputs.tests }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash test/check.sh 2>&1 | tee suite.txt   # the sandbox's dummy app check stands in for format · analyze · the suite · coverage · APK
+      - if: always()
+        run: |
+          last() { [ -f "$1" ] && grep -v '^[[:space:]]*$' "$1" | tail -n 1 | tr -d '\r' | cut -c1-200; }
+          [ -f suite.txt ] && echo "::notice title=tests ($SUITE)::$(last suite.txt)"
+          true
+  walk:
+    needs: changes
+    if: needs.changes.outputs.walk == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/walk" jsdom@30.0.1 puppeteer-core@25.4.0
+      - env:
+          DRIVERS: ${{ needs.changes.outputs.drivers }}
+        run: |
+          export NODE_PATH="$RUNNER_TEMP/walk/node_modules" CHROME=/usr/bin/google-chrome CHROME_PATH=/usr/bin/google-chrome
+          python3 tool/road/walks.py $DRIVERS
+  review:
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 tool/road/review.py check --base "origin/$BASE_REF"
+  rules-isolation:                            # INV-S22-21 — merge-blocking
+    if: false                                 # gated off until B4 — its harness lands there (BA-009)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm install -g firebase-tools
+      - run: firebase emulators:exec --only firestore "npm --prefix test/rules test"
+  nightly-full:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "nightly-full placeholder — schedule trigger + content land at B4 (BA-009; canon's empty steps list is invalid Actions syntax)"
+  gate:
+    needs: [changes, spec-lint, road, app, walk, review, rules-isolation]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          printf '%s\n' "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if [ "$DRAFT" = true ]; then
+            echo "gate: DRAFT — this pull request is still a draft; it turns ready when the work, the review and the records are done. Not a failure to fix."
+            exit 1
+          fi
+          if printf '%s\n' "$NEEDS" | jq -e 'to_entries | all(.value.result == "success" or .value.result == "skipped")' > /dev/null; then
+            echo "gate: GREEN"
+          else
+            echo "gate: RED — a job it needs failed or was cancelled (above)"
+            exit 1
+          fi

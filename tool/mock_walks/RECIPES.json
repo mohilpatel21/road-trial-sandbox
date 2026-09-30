@@ -1,0 +1,17 @@
+[
+  {
+    "driver": "walk_dummy.js",
+    "mocks": [
+      "mocks/dummy.html"
+    ],
+    "cmd": [
+      "node",
+      "tool/mock_walks/walk_dummy.js"
+    ],
+    "expect": [
+      "dummy walk: 3 checks · 3 green · 0 red"
+    ],
+    "bound": 120,
+    "proven": "THE TRIAL's G12 (the sandbox's dummy walk on a GitHub runner)"
+  }
+]

@@ -1,0 +1,46 @@
+# The ONE lawful door for goldens/ci updates (the B1-13 CI-red lesson): the ci golden set must be rendered by the CI's own rasterizer
+# (Linux) — a local --update-goldens never touches it (flutter_test_config gates the ci set behind the CI env). RECUT AT B2-ROAD-A · THE
+# ROAD (2026-09-30 — the decision map CD-7, the cross-check K-3, THE TRIAL's G8): the driver dispatches it on its OWN relay branch,
+# before the review — `gh workflow run regen-ci-goldens.yml -f branch=<the relay's branch>` — and it commits the regenerated pictures to
+# that branch; main is refused (main is locked; its pictures arrive by the relay's pull request and his Merge tap). Its push starts no
+# workflow (a push with the default GITHUB_TOKEN never does — measured at B1G-R2 and in THE TRIAL's G8), so the driver's next push
+# starts the checks on the new head. law.yml's L5 accepts a goldens/ci change only from this workflow's commits.
+name: regen-ci-goldens
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "the relay's own branch (never main)"
+        required: true
+jobs:
+  regen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - env:
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          case "$BRANCH" in ""|main|master|refs/heads/main|refs/heads/master)
+            echo "regen-ci-goldens: refused — the pictures regenerate on a relay's own branch, never on main (THE ROAD)"; exit 1;;
+          esac
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.branch }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.6"
+          channel: stable
+      - run: flutter pub get
+      # G5 evicted 2026-08-19 (W3-R32): a diagnostic timing arm has no business gating a picture-redraw (the R28-6 flake's receipt).
+      - run: flutter test --update-goldens $(find test -name '*_test.dart' ! -name 'g5_ceremony_frame_pin_test.dart')
+      - env:
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          git config user.name "regen-ci-goldens"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A -- '*/goldens/ci/*.png'
+          git diff --cached --quiet && echo "ci goldens already current" && exit 0
+          git commit -m "ci goldens regenerated on the CI renderer (regen-ci-goldens workflow, on $BRANCH)"
+          git push origin "HEAD:refs/heads/$BRANCH"

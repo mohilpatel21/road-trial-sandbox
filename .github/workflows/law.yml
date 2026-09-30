@@ -1,27 +1,29 @@
 name: law
-# Runs from MAIN's own copy (pull_request_target): reads the PR's file list and body through the API and env, runs no PR code.
+# THE PULL-REQUEST CHECK (B2-ROAD-A · RELAY A · THE ROAD, 2026-09-30 — the decision map CD-4 · CD-19, the cross-check K-2 · K-10; its
+# prototype proven in THE TRIAL's G7 and G9). A required check beside `gate`. It runs from MAIN's own copy (pull_request_target): the
+# pull request cannot reshape the check that judges it. It reads the pull request's files, commits and body through the API and the
+# environment and runs tool/road/law.py from main's checkout — never the pull request's code (no checkout of its head, the body read
+# through `env:`, never interpolated into the script). The rules: the report's sections · READ FIRST · no test lost · the baseline only
+# shrinks · pictures only from regen · no specs beside lib · the size caps · no comment triggers · the old path's files — law.py's header.
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
 permissions:
   contents: read
   pull-requests: read
 jobs:
   law:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v5      # main's own copy — pull_request_target's default ref; never the pull request's head
+        with:
+          persist-credentials: false
       - env:
           GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DRAFT: ${{ github.event.pull_request.draft }}
           BODY: ${{ github.event.pull_request.body }}
-        run: |
-          files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')
-          printf '%s\n' "$files"
-          if printf '%s\n' "$files" | grep -qE '^\.github/'; then
-            if ! printf '%s' "$BODY" | grep -q 'READ FIRST'; then
-              echo "FAIL: this change touches the checks themselves; its body must carry READ FIRST"
-              exit 1
-            fi
-          fi
-          echo "law: ok"
+        run: python3 tool/road/law.py

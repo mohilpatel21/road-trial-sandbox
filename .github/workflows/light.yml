@@ -1,46 +1,38 @@
 name: light
-# The green light, posted from MAIN's own copy after the pr workflow succeeds on a ready pull request, once `law` is green too.
-# READ FIRST is computed here from the PR's changed paths, so a PR cannot remove it by editing its own workflows.
+# THE GREEN LIGHT (B2-ROAD-A · RELAY A · THE ROAD, 2026-09-30 — the decision map CD-5 · CD-8 · CD-9, the cross-check K-2 · K-11 · K-15;
+# its prototype proven in THE TRIAL's P3, its false green on PR #3 cured here). When a `ci` or `law` run of a pull request completes,
+# main's own copy of tool/road/light.py checks the pull request's current head — not a draft · the newest gate green · every law from
+# main's law.yml green · GitHub's own merge state CLEAN — and then posts the green light once per head, mentioning the founder and
+# re-assigning him so his phone rings. It runs none of the pull request's code. No workflow here triggers on a comment (CD-4).
 on:
   workflow_run:
-    workflows: [pr]
+    workflows: [ci, law]
     types: [completed]
 permissions:
   contents: read
   checks: read
+  actions: read
   pull-requests: write
   issues: write
+concurrency:
+  group: light-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
 jobs:
   light:
-    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
+    if: github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.event == 'pull_request_target'
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
+      - uses: actions/checkout@v5      # main's own copy
+        with:
+          persist-credentials: false
       - env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
-          BRANCH: ${{ github.event.workflow_run.head_branch }}
           OWNER: ${{ github.repository_owner }}
-        run: |
-          PR=$(gh api "repos/$REPO/pulls?state=open&head=$OWNER:$BRANCH" --jq '.[0].number // empty')
-          [ -n "$PR" ] || { echo "no open pull request for $BRANCH"; exit 0; }
-          [ "$(gh api "repos/$REPO/pulls/$PR" --jq .draft)" = false ] || { echo "draft — no light"; exit 0; }
-          [ "$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)" = "$SHA" ] || { echo "stale run — the PR moved on"; exit 0; }
-          law=""
-          for i in $(seq 1 12); do
-            law=$(gh api "repos/$REPO/commits/$SHA/check-runs?check_name=law" --jq '[.check_runs[] | select(.app.slug=="github-actions")][0].conclusion // empty')
-            [ -n "$law" ] && break
-            sleep 10
-          done
-          echo "law on $SHA: ${law:-none}"
-          [ "$law" = success ] || { echo "law is not green — no light"; exit 0; }
-          short=$(printf '%s' "$SHA" | cut -c1-7)
-          if gh api "repos/$REPO/issues/$PR/comments" --paginate --jq '.[].body' | grep -q "light for $short"; then echo "already lit for $short"; exit 0; fi
-          rf=""
-          if gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' | grep -qE '^\.github/'; then
-            rf="READ FIRST — this change touches the checks themselves. "
-          fi
-          gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="${rf}@mohilpatel21 ✅ all checks passed (light for $short) — you can tap Merge."
-          gh api -X DELETE "repos/$REPO/issues/$PR/assignees" -f 'assignees[]=mohilpatel21' > /dev/null || true
-          gh api -X POST "repos/$REPO/issues/$PR/assignees" -f 'assignees[]=mohilpatel21' > /dev/null
-          echo "lit $PR at $short"
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          PRS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
+        run: python3 tool/road/light.py
