@@ -1,0 +1,8 @@
+verdict: GREEN
+pass: full
+fingerprint: aef89e1a0f28919f60b4dad742d51b7fef67203836cf7c056cb6cfe5d04d52fd
+base: 497ca86429b33474619b858a6a68588c89dd3d25
+head: d23d87fcdb3969c1334daad5a17fccf3f1ad047f
+paths: 3
+model: stand-in-reviewer
+date: 2026-09-30T11:37:38Z
