@@ -1,0 +1,27 @@
+name: law
+# Runs from MAIN's own copy (pull_request_target): reads the PR's file list and body through the API and env, runs no PR code.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  law:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')
+          printf '%s\n' "$files"
+          if printf '%s\n' "$files" | grep -qE '^\.github/'; then
+            if ! printf '%s' "$BODY" | grep -q 'READ FIRST'; then
+              echo "FAIL: this change touches the checks themselves; its body must carry READ FIRST"
+              exit 1
+            fi
+          fi
+          echo "law: ok"

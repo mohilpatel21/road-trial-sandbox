@@ -1,0 +1,16 @@
+name: regen
+# A dummy picture regeneration (K-3): started by hand on a branch, it commits there with its own token — which starts no workflow.
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  regen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          echo "picture regenerated $(date -u +%FT%TZ)" >> goldens/ci/pic.txt
+          git config user.name regen
+          git config user.email actions@users.noreply.github.com
+          git commit -am "regen: pictures regenerated"
+          git push

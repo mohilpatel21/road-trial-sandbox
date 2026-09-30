@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dummy mock</title>
+<style>
+  body { margin: 0; font: 16px/1.4 sans-serif; background: #f7f3ea; color: #222; }
+  .card { margin: 24px; padding: 16px; border-radius: 12px; background: #fff; }
+  .row { height: 48px; }
+</style>
+</head>
+<body>
+<div class="card"><div class="row" id="a">One</div><div class="row" id="b">Two</div><div class="row" id="c">Three</div></div>
+<script>
+window.__walk = function () {
+  var checks = 0, green = 0;
+  ['a', 'b', 'c'].forEach(function (id) {
+    checks++;
+    var r = document.getElementById(id).getBoundingClientRect();
+    if (r.height >= 44) green++;
+  });
+  return { summary: 'dummy walk: ' + checks + ' checks · ' + green + ' green · ' + (checks - green) + ' red' };
+};
+</script>
+</body>
+</html>
