@@ -7,13 +7,16 @@ understood), and each command's own words are read; a `bash -c`/`sh -c`/`eval` s
 fed to a shell are judged as commands of their own. It refuses only:
   - git push that forces or deletes (--force · -f · --force-with-lease · --force-if-includes · --mirror · --delete · -d · --prune ·
     a +refspec or :refspec); git reset --hard; git clean (any);
-  - rm that is recursive AND forced, unless every target lies under verify/ (the WR-24 prune door) or /tmp/;
+  - rm that is recursive (forced or not), unless every target lies under verify/ (the WR-24 prune door), a temp folder or a cache;
   - merging on GitHub: gh pr merge; a write through gh api or curl to …/merge(s), …/rulesets, …/protection, …/hooks, …/dispatches,
     …/secrets, …/variables, …/keys, …/collaborators or …/actions/permissions; a graphql mutation that merges or changes protection;
   - gh workflow run except regen-ci-goldens.yml (never on main) and ci.yml; gh secret · variable · auth (but status) · repo
     delete/edit/archive/rename/transfer;
   - flutter clean; firebase deploy.
-`--reviewer` (the reviewer's own hook) also refuses every git write (a read-only allow-list) and any redirection or tee outside /tmp.
+`--reviewer` (the reviewer's own hook) also refuses every git write but `fetch` and a worktree added or removed under /tmp (a read-only
+allow-list: branch and tag in their listing forms, remote as -v · show · get-url, no reflog expiry), and any redirection or tee outside
+/tmp. It is not a sandbox: a copy, a move, an in-place edit or a script's write passes it — the reviewer's instructions forbid them, and
+a byte written into the branch changes the fingerprint its verdict binds, so the gate's review check fails (tool/road/review.py).
 A command text that cannot be parsed (an unbalanced quote) is read by a narrow fallback pattern for the same forms; an unreadable
 payload is refused. Claude Code: exit 2 + the reason on stderr. Codex (`--client codex`): the JSON deny on stdout, exit 0.
 Fixtures: tool/road/test_road.py (guard_*).
@@ -32,12 +35,19 @@ GQL_BAD = re.compile(r"\bmutation\b[\s\S]*\b(mergePullRequest|enablePullRequestA
 READ_ONLY_GIT = {"status", "log", "diff", "show", "rev-parse", "merge-base", "ls-files", "ls-tree", "cat-file", "grep", "blame",
                  "describe", "name-rev", "shortlog", "worktree", "fetch", "for-each-ref", "rev-list", "count-objects",
                  "check-ignore", "check-attr", "show-ref", "reflog", "remote", "config", "branch", "tag", "version", "help"}
+BRANCH_LIST = {"--list", "-l", "-a", "--all", "-r", "--remotes", "--show-current", "--contains", "--no-contains", "--merged",
+               "--no-merged", "--points-at", "-v", "-vv", "--verbose", "--format", "--sort", "--column", "--no-column"}
+BRANCH_WRITE = {"-d", "-D", "-m", "-M", "-c", "-C", "--delete", "--move", "--copy", "-f", "--force", "-u", "--set-upstream-to",
+                "--unset-upstream", "-t", "--track", "--no-track", "--edit-description", "--create-reflog"}
+TAG_LIST = {"-l", "--list", "--contains", "--no-contains", "--points-at", "--merged", "--no-merged", "--format", "--sort", "--column"}
+TAG_WRITE = {"-d", "--delete", "-a", "--annotate", "-s", "--sign", "-u", "--local-user", "-f", "--force", "-m", "--message", "-F",
+             "--file", "-e", "--edit", "--create-reflog"}
 FALLBACK = [
     (re.compile(r"\bgit\s+push\b[^\n;&|]*\s(--force\b|--force-with-lease\b|-f\b|--mirror\b|--delete\b)"), "a forced or deleting git push"),
     (re.compile(r"\bgit\s+reset\s+--hard\b"), "git reset --hard"),
     (re.compile(r"\bgit\s+clean\b"), "git clean"),
     (re.compile(r"\bgh\s+pr\s+merge\b"), "gh pr merge"),
-    (re.compile(r"\brm\s+-\w*(r\w*f|f\w*r)"), "a recursive forced rm"),
+    (re.compile(r"\brm\s+(-\w*[rR]|--recursive\b)"), "a recursive rm"),
     (re.compile(r"\bflutter\s+clean\b"), "flutter clean"),
     (re.compile(r"\bfirebase\s+deploy\b"), "firebase deploy"),
 ]
@@ -181,8 +191,29 @@ def judge_git(args, reviewer):
     if reviewer:
         if sub not in READ_ONLY_GIT:
             raise Refuse(f"git {sub} — the reviewer reads; its one write is tool/road/review.py record")
-        if sub == "branch" and any(f in rest for f in ("-d", "-D", "-m", "-M", "-c", "-C", "--delete", "--move")):
-            raise Refuse("git branch changes — the reviewer reads")
+        pos = [a for a in rest if not a.startswith("-")]
+        names = {a.split("=", 1)[0] for a in rest if a.startswith("-")}
+        if sub == "branch" and (names & BRANCH_WRITE or (pos and not names & BRANCH_LIST)):
+            raise Refuse("git branch changes — the reviewer reads (the listing forms only)")
+        if sub == "tag" and (names & TAG_WRITE or (pos and not names & TAG_LIST and not any(re.match(r"^-n\d*$", a) for a in rest))):
+            raise Refuse("git tag changes — the reviewer reads (the listing forms only)")
+        if sub == "remote" and pos and pos[0] not in ("show", "get-url"):
+            raise Refuse(f"git remote {pos[0]} — the reviewer reads (git remote -v · show · get-url)")
+        if sub == "reflog" and pos and pos[0] in ("expire", "delete"):
+            raise Refuse(f"git reflog {pos[0]} — the reviewer reads")
+        if sub == "worktree":
+            wpos, k = [], 0
+            while k < len(rest):
+                if rest[k] in ("-b", "-B", "--reason"):
+                    raise Refuse(f"git worktree {rest[k]} — the reviewer creates no branch and locks nothing")
+                if not rest[k].startswith("-"):
+                    wpos.append(rest[k])
+                k += 1
+            act = wpos[0] if wpos else ""
+            if act not in ("list", "add", "remove"):
+                raise Refuse(f"git worktree {act} — the reviewer's worktree is listed, or added and removed under /tmp")
+            if act in ("add", "remove") and (len(wpos) < 2 or outside_tmp(wpos[1].replace("\\", "/"))):
+                raise Refuse(f"git worktree {act} outside /tmp — the reviewer's scratch copy lives under /tmp")
         if sub == "config" and not any(f in rest for f in ("--get", "--list", "-l", "--get-all", "--get-regexp")):
             raise Refuse("git config write — the reviewer reads")
     if sub == "push":
@@ -198,10 +229,23 @@ def judge_git(args, reviewer):
         raise Refuse("git clean — it wipes untracked work (verify/ among it); founder-run only")
 
 
+def gh_words(args):
+    """gh's command words, its flags skipped (-R/--repo and --hostname with their values): `gh pr -R o/r merge 5` → pr merge 5."""
+    out, k = [], 0
+    while k < len(args):
+        if args[k] in ("-R", "--repo", "--hostname"):
+            k += 2; continue
+        if not args[k].startswith("-"):
+            out.append(args[k])
+        k += 1
+    return out
+
+
 def judge_gh(args):
     if not args:
         return
-    sub, act = args[0], (args[1] if len(args) > 1 else "")
+    words = gh_words(args)
+    sub, act = (words[0] if words else ""), (words[1] if len(words) > 1 else "")
     if sub == "pr" and act == "merge":
         raise Refuse("gh pr merge — the AI never merges; he taps Merge")
     if sub == "api":
@@ -213,6 +257,8 @@ def judge_gh(args):
                 method = args[k + 1].upper(); k += 2; continue
             if a.startswith("--method="):
                 method = a.split("=", 1)[1].upper(); k += 1; continue
+            if a.startswith("-X") and len(a) > 2:
+                method = a[2:].upper(); k += 1; continue
             if a in ("-f", "-F", "--field", "--raw-field", "--input") and k + 1 < len(args):
                 fields = True; body += " " + args[k + 1]; k += 2; continue
             if not a.startswith("-") and not ep:
@@ -225,7 +271,7 @@ def judge_gh(args):
         elif method != "GET" and SENSITIVE.search("/" + ep.lstrip("/")):
             raise Refuse(f"gh api {method} {ep} — merging, the lock, hooks, dispatches and secrets are never the AI's")
     if sub == "workflow" and act == "run":
-        target = args[2] if len(args) > 2 else ""
+        target = words[2] if len(words) > 2 else ""
         if target in ("regen-ci-goldens.yml", "regen-ci-goldens"):
             joined = " ".join(args)
             if re.search(r"branch=(main|master|refs/heads/main)\b", joined):
@@ -293,18 +339,17 @@ def judge_argv(argv, redirs, reviewer, depth):
         short = "".join(a[1:] for a in argv[1:] if a.startswith("-") and not a.startswith("--"))
         longs = [a for a in argv[1:] if a.startswith("--")]
         recursive = "r" in short or "R" in short or "--recursive" in longs
-        force = "f" in short or "--force" in longs
-        if recursive and force and "xargs" in seen:
-            raise Refuse("xargs rm -rf — a forced recursive delete of targets read from a pipe")
-        if recursive and force:
+        if recursive and "xargs" in seen:
+            raise Refuse("xargs rm -r — a recursive delete of targets read from a pipe")
+        if recursive:   # forced or not: a recursive rm deletes without asking; tracked files leave by `git rm`
             for t in (a for a in argv[1:] if not a.startswith("-")):
                 tn = t.replace("\\", "/").rstrip("/")
                 last = tn.rsplit("/", 1)[-1]
                 safe = ".." not in tn and (tn.startswith("verify/") or "/verify/" in tn or tn.startswith("/tmp/")
                                             or "/temp/" in tn.lower() + "/" or last in CACHES)
                 if not safe:
-                    raise Refuse(f"rm -rf {t} — a forced recursive delete outside verify/, a temp folder or a cache "
-                                 f"(the prune door: rm -r verify/<path>)")
+                    raise Refuse(f"rm -r {t} — a recursive delete outside verify/, a temp folder or a cache "
+                                 f"(the prune door: rm -r verify/<path>; tracked files leave by git rm)")
     elif w == "flutter" and len(argv) > 1 and argv[1] == "clean":
         raise Refuse("flutter clean — founder-run only")
     elif w == "firebase" and "deploy" in argv[1:]:

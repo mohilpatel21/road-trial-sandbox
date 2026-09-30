@@ -88,6 +88,15 @@ GUARD = [
     ("guard_api_hooks", "gh api --method POST repos/o/r/hooks --input hook.json", False, "BLOCK"),
     ("guard_gql_merge", "gh api graphql -f query='mutation { mergePullRequest(input:{pullRequestId:\"x\"}) { clientMutationId } }'", False, "BLOCK"),
     ("guard_gql_read", "gh api graphql -f query='query { viewer { login } }'", False, "PASS"),
+    # B2-ROAD-A's plan pass (its readings): gh's -R before the action, -XPUT attached, a recursive rm unforced
+    ("guard_pr_merge_repo", "gh pr -R o/r merge 12", False, "BLOCK"),
+    ("guard_pr_merge_repo_long", "gh pr --repo o/r merge 12 --squash", False, "BLOCK"),
+    ("guard_pr_list_search", "gh pr list --search merge", False, "PASS"),
+    ("guard_api_merge_attached", "gh api -XPUT repos/o/r/pulls/12/merge", False, "BLOCK"),
+    ("guard_workflow_repo_regen_main", "gh workflow -R o/r run regen-ci-goldens.yml -f branch=main", False, "BLOCK"),
+    ("guard_rm_r_lib", "rm -r lib/ui", False, "BLOCK"),
+    ("guard_rm_r_tmp", "rm -r /tmp/review_x", False, "PASS"),
+    ("guard_xargs_rm_r", "ls | xargs rm -r", False, "BLOCK"),
     ("guard_curl_merge", "curl -X PUT -H 'Authorization: token t' https://api.github.com/repos/o/r/pulls/1/merge", False, "BLOCK"),
     ("guard_curl_read", "curl -s https://api.github.com/repos/o/r/pulls/1", False, "PASS"),
     ("guard_regen_branch", "gh workflow run regen-ci-goldens.yml -f branch=b2-r53-lock", False, "PASS"),
@@ -112,6 +121,18 @@ GUARD = [
     ("guard_reviewer_redirect_tmp", "flutter analyze > /tmp/analyze.txt 2>&1", True, "PASS"),
     ("guard_reviewer_input", "wc -l < lib/main.dart", True, "PASS"),
     ("guard_reviewer_tee", "flutter test | tee test_out.txt", True, "BLOCK"),
+    # B2-ROAD-A's plan pass (its finding 1): the reviewer's git in its listing forms only; its worktree under /tmp
+    ("guard_reviewer_branch_create", "git branch review-scratch", True, "BLOCK"),
+    ("guard_reviewer_branch_list", "git branch -a --contains abc123", True, "PASS"),
+    ("guard_reviewer_tag_create", "git tag v9", True, "BLOCK"),
+    ("guard_reviewer_tag_list", "git tag -l 'v*'", True, "PASS"),
+    ("guard_reviewer_remote_add", "git remote add up https://example.invalid/r.git", True, "BLOCK"),
+    ("guard_reviewer_remote_v", "git remote -v", True, "PASS"),
+    ("guard_reviewer_reflog_expire", "git reflog expire --expire=now --all", True, "BLOCK"),
+    ("guard_reviewer_worktree_remove_repo", "git worktree remove D:/development/becoming", True, "BLOCK"),
+    ("guard_reviewer_worktree_remove_tmp", "git worktree remove --force /tmp/review_b2", True, "PASS"),
+    ("guard_reviewer_worktree_branch", "git worktree add -b scratch /tmp/review_b2 HEAD", True, "BLOCK"),
+    ("guard_reviewer_fetch", "git fetch origin", True, "PASS"),
 ]
 
 
@@ -119,9 +140,22 @@ def test_guard():
     for name, cmd, reviewer, want in GUARD:
         got = verdict(cmd, reviewer)
         check(name, got.startswith(want), f"{cmd!r} → {got}")
-    # the launcher's payload forms: Claude's string and Codex's list; an unreadable payload refused
-    rc = guard.main.__code__ is not None
-    check("guard_main_present", rc)
+    # the hook's payload forms, through guard.py's own entry (B2-ROAD-A's plan pass, a reading: the old fixture asserted none of them):
+    # Claude's string and a list command judged; an unreadable payload refused; Codex answered with the JSON deny and exit 0
+    gp = os.path.join(HERE, "guard.py")
+    def hook(payload, *extra):
+        r = subprocess.run([sys.executable, "-B", gp, *extra], input=payload.encode("utf-8"), capture_output=True)
+        return r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
+    rc, _, err = hook(json.dumps({"tool_input": {"command": "gh pr merge 5 --squash"}}))
+    check("guard_payload_string_blocked", rc == 2 and "BLOCKED by THE SMALL GUARD" in err, f"rc {rc} · {err[:80]}")
+    rc, _, err = hook(json.dumps({"tool_input": {"command": ["git", "push", "--force", "origin", "main"]}}))
+    check("guard_payload_list_blocked", rc == 2 and "BLOCKED" in err, f"rc {rc} · {err[:80]}")
+    rc, _, err = hook(json.dumps({"tool_input": {"command": "git status"}}))
+    check("guard_payload_string_passes", rc == 0 and not err, f"rc {rc} · {err[:80]}")
+    rc, _, err = hook("not json at all")
+    check("guard_payload_unreadable_refused", rc == 2 and "could not be read" in err, f"rc {rc} · {err[:80]}")
+    rc, out, _ = hook(json.dumps({"tool_input": {"command": "gh pr merge 5"}}), "--client", "codex")
+    check("guard_payload_codex_deny", rc == 0 and json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny", f"rc {rc} · {out[:80]}")
 
 
 def test_changes():
