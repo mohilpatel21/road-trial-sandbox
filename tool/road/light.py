@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import roadlib  # noqa: E402
 
 WAIT_TRIES, WAIT_SECONDS = 12, 15
-PASS_WORDS = {"full": "GREEN on the first pass", "recheck": "GREEN after one fix", "his decision": "his decision after two halts — not a review verdict"}
+PASS_WORDS = {"full": "GREEN on the first pass", "recheck": "GREEN after one fix", "his decision": "stopped once; its findings fixed and checked by the driver — gone on by your word, not a review approval"}
 
 
 def sections(body):

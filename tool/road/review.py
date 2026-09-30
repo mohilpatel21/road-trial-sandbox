@@ -11,7 +11,9 @@ from main and a records commit keep a verdict; any other commit voids it.
         — THE REVIEWER's one write: review/VERDICT for this change (the driver commits it with review/WORDS.md, the reviewer's words
           verbatim). The driver never runs it.
   python3 tool/road/review.py decision --words "<his words, verbatim>" [--base origin/main]
-        — the founder's decision after a second HALT (CD-3), recorded by the driver as HIS decision, never as a review verdict.
+        — HIS decision, recorded by the driver, never a review verdict: after the one review's HALT, its findings fixed and checked by
+          the driver (his standing word of 2026-09-30, verbatim in design/FIELD_NOTES.md — no second review, no asking him), or any
+          decision he gives.
   python3 tool/road/review.py check [--base origin/main]
         — the gate's `review` job: records only → ok; else review/VERDICT (read from HEAD, never the working copy) must be GREEN or
           DECISION for this exact change, and review/WORDS.md present.
