@@ -1,4 +1,5 @@
 name: pr
+# Runs the app, review and walk jobs for pull requests and pushes to main; gate sums them up.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
