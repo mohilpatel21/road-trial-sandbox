@@ -1,4 +1,5 @@
 # The ONE lawful door for goldens/ci updates (the B1-13 CI-red lesson): the ci golden set must be rendered by the CI's own rasterizer
+# rehearsal R-C: a comment line (B2-ROAD-A)
 # (Linux) — a local --update-goldens never touches it (flutter_test_config gates the ci set behind the CI env). RECUT AT B2-ROAD-A · THE
 # ROAD (2026-09-30 — the decision map CD-7, the cross-check K-3, THE TRIAL's G8): the driver dispatches it on its OWN relay branch,
 # before the review — `gh workflow run regen-ci-goldens.yml -f branch=<the relay's branch>` — and it commits the regenerated pictures to
